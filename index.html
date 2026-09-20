@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web3 Gas & Calldata Security Inspector | CashFlow Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .glass-card { background: rgba(22, 27, 34, 0.85); backdrop-filter: blur(12px); border: 1px solid #30363d; }
+    .badge-safe { background: rgba(46, 160, 67, 0.2); color: #3fb950; border: 1px solid #2ea043; }
+    .badge-medium { background: rgba(210, 153, 34, 0.2); color: #d29922; border: 1px solid #bb8009; }
+    .badge-high { background: rgba(248, 81, 73, 0.2); color: #f85149; border: 1px solid #da3633; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4 md:p-8">
+
+  <div class="max-w-4xl mx-auto w-full">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center pb-6 border-b border-gray-800 gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">⚡</span>
+          <h1 class="text-xl md:text-2xl font-bold text-white tracking-wide">Web3 Gas & Calldata Inspector</h1>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-blue-900 text-blue-300 font-mono">v1.0.0</span>
+        </div>
+        <p class="text-sm text-gray-400 mt-1">Zero-cost client-side EVM calldata parser, gas estimator, and security risk auditor.</p>
+      </div>
+
+      <!-- Chain Selector -->
+      <div class="flex items-center gap-2">
+        <label for="chainSelect" class="text-xs font-semibold text-gray-400">Target Chain:</label>
+        <select id="chainSelect" onchange="inspect()" class="bg-gray-800 text-sm text-gray-200 border border-gray-700 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500 font-mono">
+          <option value="bsc" selected>BNB Smart Chain (BEP20)</option>
+          <option value="ethereum">Ethereum Mainnet</option>
+          <option value="polygon">Polygon PoS</option>
+          <option value="arbitrum">Arbitrum One</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="mt-6 space-y-6">
+
+      <!-- Input Box -->
+      <div class="glass-card rounded-xl p-5 shadow-lg">
+        <div class="flex justify-between items-center mb-2">
+          <label for="calldataInput" class="text-sm font-semibold text-gray-300">Raw Hex Calldata / Input Data</label>
+          <div class="space-x-2 text-xs">
+            <button onclick="loadSample('transfer')" class="text-blue-400 hover:underline">Sample Transfer</button>
+            <span class="text-gray-600">|</span>
+            <button onclick="loadSample('approve')" class="text-amber-400 hover:underline">Sample Unlimited Approve</button>
+            <span class="text-gray-600">|</span>
+            <button onclick="loadSample('permit')" class="text-red-400 hover:underline">Sample Permit Phish</button>
+          </div>
+        </div>
+        <textarea id="calldataInput" rows="4" placeholder="Paste 0x... calldata here"
+          class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm font-mono text-gray-200 focus:outline-none focus:border-blue-500 resize-y"
+          oninput="inspect()"></textarea>
+      </div>
+
+      <!-- Results Grid -->
+      <div id="resultContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- Left: Function & Param Breakdown -->
+        <div class="glass-card rounded-xl p-5">
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3 flex items-center justify-between">
+            <span>Decoded Signature</span>
+            <span id="riskBadge" class="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold badge-safe">SAFE</span>
+          </h2>
+
+          <div class="space-y-3 font-mono text-xs">
+            <div>
+              <span class="text-gray-500 block">Function Method:</span>
+              <div id="resMethod" class="text-white font-semibold text-sm mt-0.5 break-all">Native Transfer / Fallback</div>
+            </div>
+            <div>
+              <span class="text-gray-500 block">Selector (4 bytes):</span>
+              <div id="resSelector" class="text-cyan-400 mt-0.5">0x</div>
+            </div>
+            <div>
+              <span class="text-gray-500 block">Decoded Parameters:</span>
+              <pre id="resParams" class="bg-gray-950 p-3 rounded border border-gray-800 text-gray-300 overflow-x-auto mt-1 max-h-48">None</pre>
+            </div>
+            <div id="securityAlertBox" class="hidden p-3 rounded border">
+              <span id="securityAlertText" class="text-xs font-sans"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Gas & Cost Estimation -->
+        <div class="glass-card rounded-xl p-5">
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">
+            EIP-2028 Gas Breakdown & Fee
+          </h2>
+
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-gray-900 p-3 rounded border border-gray-800">
+                <span class="text-xs text-gray-500 block">Total Est. Gas</span>
+                <span id="resGasUnits" class="text-lg font-mono font-bold text-white">21,000</span>
+              </div>
+              <div class="bg-gray-900 p-3 rounded border border-gray-800">
+                <span class="text-xs text-gray-500 block">Est. Cost (USD)</span>
+                <span id="resGasUsd" class="text-lg font-mono font-bold text-green-400">~$0.036</span>
+              </div>
+            </div>
+
+            <div class="font-mono text-xs space-y-2 border-t border-gray-800 pt-3 text-gray-400">
+              <div class="flex justify-between">
+                <span>Payload Size:</span>
+                <span id="resBytesLen" class="text-gray-200">0 bytes</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Zero Bytes (4 gas/ea):</span>
+                <span id="resZeroBytes" class="text-gray-200">0</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Non-Zero Bytes (16 gas/ea):</span>
+                <span id="resNonzeroBytes" class="text-gray-200">0</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Intrinsic Calldata Gas:</span>
+                <span id="resIntrinsicGas" class="text-gray-200">0</span>
+              </div>
+              <div class="flex justify-between font-semibold text-gray-300">
+                <span>Network Fee:</span>
+                <span id="resFeeNative" class="text-blue-400">0.000063 BNB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- Footer & Donation Box -->
+    <footer class="mt-12 pt-6 border-t border-gray-800 text-center text-xs text-gray-500 space-y-3">
+      <div class="flex flex-col items-center justify-center gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-amber-400">☕</span>
+          <span class="text-gray-400 font-medium">Support Open Source CashFlow Studio & AI Development:</span>
+        </div>
+        <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg">
+          <span class="text-gray-500 text-[10px] uppercase font-bold tracking-wider">BSC (BEP20)</span>
+          <code id="donateAddr" class="text-gray-300 font-mono select-all">0x322f38636bf6fa64d07af5f481bcb63bc3828731</code>
+          <button onclick="copyDonation()" class="text-blue-400 hover:text-blue-300 font-sans font-semibold text-[11px] ml-1">Copy</button>
+        </div>
+      </div>
+      <p>Built with precision by <a href="https://github.com/Tsai-etc" target="_blank" class="text-gray-400 hover:underline">@Tsai-etc</a> · CashFlow Studio Engine</p>
+    </footer>
+  </div>
+
+  <script>
+    const KNOWN_SELECTORS = {
+      "0xa9059cbb": {
+        name: "transfer(address to, uint256 amount)",
+        method: "transfer",
+        risk: "LOW",
+        category: "ERC20"
+      },
+      "0x095ea7b3": {
+        name: "approve(address spender, uint256 amount)",
+        method: "approve",
+        risk: "MEDIUM",
+        category: "ERC20"
+      },
+      "0x23b872dd": {
+        name: "transferFrom(address from, address to, uint256 amount)",
+        method: "transferFrom",
+        risk: "LOW",
+        category: "ERC20"
+      },
+      "0xbaa2abde": {
+        name: "permit(address owner, address spender, uint256 value, uint256 deadline, ...)",
+        method: "permit",
+        risk: "CRITICAL",
+        category: "EIP-2612 Permit"
+      }
+    };
+
+    const CHAINS = {
+      bsc: { name: "BNB", price: 580, gwei: 3.0 },
+      ethereum: { name: "ETH", price: 2700, gwei: 15.0 },
+      polygon: { name: "POL", price: 0.40, gwei: 30.0 },
+      arbitrum: { name: "ETH", price: 2700, gwei: 0.1 }
+    };
+
+    const SAMPLES = {
+      transfer: "0xa9059cbb000000000000000000000000322f38636bf6fa64d07af5f481bcb63bc38287310000000000000000000000000000000000000000000000000de0b6b3a7640000",
+      approve: "0x095ea7b30000000000000000000000001111111254fb6c44bac0bed2854e76f90643097dffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      permit: "0xbaa2abde000000000000000000000000322f38636bf6fa64d07af5f481bcb63bc38287310000000000000000000000001111111254fb6c44bac0bed2854e76f90643097d"
+    };
+
+    function loadSample(type) {
+      document.getElementById('calldataInput').value = SAMPLES[type];
+      inspect();
+    }
+
+    function copyDonation() {
+      const addr = document.getElementById('donateAddr').innerText;
+      navigator.clipboard.writeText(addr);
+      alert("Donation address copied: " + addr);
+    }
+
+    function inspect() {
+      let raw = document.getElementById('calldataInput').value.trim();
+      if (raw.startsWith("0x") || raw.startsWith("0X")) raw = raw.slice(2);
+      
+      const chainKey = document.getElementById('chainSelect').value;
+      const chain = CHAINS[chainKey];
+
+      // Parse Bytes
+      const byteLen = Math.floor(raw.length / 2);
+      let zeroBytes = 0;
+      let nonZeroBytes = 0;
+      for (let i = 0; i < raw.length; i += 2) {
+        const b = raw.substr(i, 2);
+        if (b === "00") zeroBytes++;
+        else nonZeroBytes++;
+      }
+
+      const intrinsicCalldataGas = (zeroBytes * 4) + (nonZeroBytes * 16);
+      const baseGas = byteLen === 0 ? 21000 : 21000 + intrinsicCalldataGas + 35000;
+      const feeNative = baseGas * chain.gwei * 1e-9;
+      const feeUsd = feeNative * chain.price;
+
+      document.getElementById('resGasUnits').innerText = baseGas.toLocaleString();
+      document.getElementById('resGasUsd').innerText = "~$" + feeUsd.toFixed(4);
+      document.getElementById('resBytesLen').innerText = byteLen + " bytes";
+      document.getElementById('resZeroBytes').innerText = zeroBytes;
+      document.getElementById('resNonzeroBytes').innerText = nonZeroBytes;
+      document.getElementById('resIntrinsicGas').innerText = intrinsicCalldataGas + " gas";
+      document.getElementById('resFeeNative').innerText = feeNative.toFixed(6) + " " + chain.name;
+
+      // Selector & Decoding
+      const resMethod = document.getElementById('resMethod');
+      const resSelector = document.getElementById('resSelector');
+      const resParams = document.getElementById('resParams');
+      const riskBadge = document.getElementById('riskBadge');
+      const alertBox = document.getElementById('securityAlertBox');
+      const alertText = document.getElementById('securityAlertText');
+
+      if (raw.length === 0) {
+        resMethod.innerText = "Native Currency Transfer (ETH/BNB)";
+        resSelector.innerText = "0x";
+        resParams.innerText = "None (Plain Value Transfer)";
+        riskBadge.className = "text-xs px-2.5 py-0.5 rounded-full font-mono font-bold badge-safe";
+        riskBadge.innerText = "SAFE";
+        alertBox.className = "hidden";
+        return;
+      }
+
+      const selector = "0x" + raw.slice(0, 8).toLowerCase();
+      resSelector.innerText = selector;
+
+      const payload = raw.slice(8);
+      const words = [];
+      for (let i = 0; i < payload.length; i += 64) {
+        words.push(payload.substr(i, 64));
+      }
+
+      if (KNOWN_SELECTORS[selector]) {
+        const def = KNOWN_SELECTORS[selector];
+        resMethod.innerText = def.name;
+
+        let paramsDecoded = {};
+        let risk = def.risk;
+        let warning = "";
+
+        if (def.method === "transfer") {
+          const toAddr = "0x" + (words[0] || "").slice(-40);
+          const amountHex = words[1] || "0";
+          paramsDecoded = { recipient: toAddr, raw_amount: "0x" + amountHex };
+        } else if (def.method === "approve") {
+          const spender = "0x" + (words[0] || "").slice(-40);
+          const amountHex = words[1] || "0";
+          const isMax = amountHex.toLowerCase().includes("fffff");
+          paramsDecoded = { spender: spender, allowance: isMax ? "MAX_UINT256 (UNLIMITED)" : "0x" + amountHex };
+          if (isMax) {
+            risk = "HIGH";
+            warning = "⚠️ WARNING: Unlimited Token Allowance! If this spender contract is compromised or malicious, it can drain all tokens from your balance.";
+          }
+        } else if (def.method === "permit") {
+          risk = "CRITICAL";
+          warning = "🚨 CRITICAL: Off-chain EIP-2612 Permit Call! Malicious phishing sites trick users into signing permits without paying gas. Verify recipient carefully.";
+          paramsDecoded = { raw_words: words };
+        }
+
+        resParams.innerText = JSON.stringify(paramsDecoded, null, 2);
+        
+        if (risk === "CRITICAL" || risk === "HIGH") {
+          riskBadge.className = "text-xs px-2.5 py-0.5 rounded-full font-mono font-bold badge-high";
+          riskBadge.innerText = risk;
+          alertBox.className = "p-3 rounded border border-red-800 bg-red-950/40 text-red-300 block";
+          alertText.innerText = warning;
+        } else {
+          riskBadge.className = "text-xs px-2.5 py-0.5 rounded-full font-mono font-bold badge-safe";
+          riskBadge.innerText = risk;
+          alertBox.className = "hidden";
+        }
+
+      } else {
+        resMethod.innerText = "Custom / Unverified Contract (" + selector + ")";
+        resParams.innerText = JSON.stringify({ words: words.map(w => "0x" + w) }, null, 2);
+        riskBadge.className = "text-xs px-2.5 py-0.5 rounded-full font-mono font-bold badge-medium";
+        riskBadge.innerText = "UNVERIFIED";
+        alertBox.className = "p-3 rounded border border-yellow-800 bg-yellow-950/40 text-yellow-300 block";
+        alertText.innerText = "Note: Selector not recognized in standard DeFi dictionary. Confirm contract authenticity on BSCScan/Etherscan.";
+      }
+    }
+
+    // Initialize on load
+    inspect();
+  </script>
+</body>
+</html>
